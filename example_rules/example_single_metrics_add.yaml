@@ -1,0 +1,40 @@
+name: CPU Spike Rule
+type: metric_aggregation
+
+es_host: localhost
+es_port: 9200
+
+index: metrics
+
+buffer_time:
+  minutes: 2
+
+aggragation:
+  minutes: 2
+
+metric_agg_key: fields.write_time
+metric_agg_type: avg
+#extended_stats_sigma: 
+doc_type: metrics_test
+query_key: tags.host.keyword 
+#bucket_interval_sync: true
+#stats_threshold:
+ #   count_min_threshold:
+ #   count_max_threshold: 100
+ #   min_threshold:
+ #   max_threshold: 100
+ #   sum_min_thresold:
+#    sum_max_threshold: 100
+#    avg_min_threshold:
+#    avg_max_threshold: 100  
+    
+            
+min_threshold: 30
+max_threshold: 100
+#victorops_api_key: "be4dccea-31d2-4ea9-8af6-ab23d9cac950"
+#victorops_routing_key: "on_call"
+#victorops_message_type: "CRITICAL"
+# (Required)
+# The alert is use when a match is found
+alert:
+- "debug" 

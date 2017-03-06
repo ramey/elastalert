@@ -40,7 +40,8 @@ rules_mapping = {
     'change': ruletypes.ChangeRule,
     'flatline': ruletypes.FlatlineRule,
     'new_term': ruletypes.NewTermsRule,
-    'cardinality': ruletypes.CardinalityRule
+    'cardinality': ruletypes.CardinalityRule,
+    'metric_aggregation': ruletypes.MetricAggregationRule
 }
 
 # Used to map names of alerts to their classes
@@ -55,6 +56,7 @@ alerts_mapping = {
     'hipchat': alerts.HipChatAlerter,
     'slack': alerts.SlackAlerter,
     'pagerduty': alerts.PagerDutyAlerter,
+    'exotel': alerts.ExotelAlerter,
     'twilio': alerts.TwilioAlerter,
     'victorops': alerts.VictorOpsAlerter,
     'telegram': alerts.TelegramAlerter,
@@ -95,7 +97,6 @@ def load_configuration(filename, conf, args=None):
         rule = yaml_loader(filename)
     except yaml.scanner.ScannerError as e:
         raise EAException('Could not parse file %s: %s' % (filename, e))
-
     rule['rule_file'] = filename
     load_options(rule, conf, args)
     load_modules(rule, args)
@@ -150,6 +151,8 @@ def load_options(rule, conf, args=None):
     rule.setdefault('_source_enabled', True)
     rule.setdefault('use_local_time', True)
     rule.setdefault('description', "")
+    rule.setdefault('buckets', [])
+    rule.setdefault('extended_stats_sigma', 3)
 
     # Set timestamp_type conversion function, used when generating queries and processing hits
     rule['timestamp_type'] = rule['timestamp_type'].strip().lower()

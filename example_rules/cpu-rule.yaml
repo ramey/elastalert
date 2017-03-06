@@ -17,7 +17,7 @@ es_port: 9200
 
 # (Required)
 # Rule name, must be unique
-name: Example rule
+name: CPU rule
 
 # (Required)
 # Type of alert.
@@ -30,20 +30,23 @@ index: metrics
 
 # (Required, frequency specific)
 # Alert when this many documents matching the query occur within a timeframe
-num_events: 10
+num_events: 1
 
 # (Required, frequency specific)
 # num_events must occur within this amount of time to trigger an alert
 timeframe:
-  minutes: 5
+  minutes: 2
 
+query_key: 'tag.cpu'
 # (Required)
 # A list of Elasticsearch filters used for find events
 # These filters are joined with AND and nested in a filtered query
 # For more info: http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/query-dsl.html
 filter:
-- term:
-    some_field: "some_value"
+- range:
+    fields.usage_idle:
+        from: 30
+        to: 100
 
 # (Required)
 # The alert is use when a match is found

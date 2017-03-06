@@ -1,0 +1,25 @@
+es_host: localhost
+
+es_port: 9200
+
+name: channel occupancy rule
+
+type: flatline
+index: metrics
+
+threshold: 6
+
+timeframe:
+  minutes: 1
+
+query_key: 'tag.host'
+filter:
+- query:
+    query_string:
+        query: "name: channel_occupancy"
+
+alert:
+- "email"
+
+email:
+- "ramey@exotel.in"

@@ -1,0 +1,84 @@
+name: CPU Spike Rule
+type: metric_aggregation
+
+es_host: localhost
+es_port: 9200
+
+index: metrics
+
+buffer_time:
+  minutes: 5
+
+metric_agg_key: fields.value
+metric_agg_type: avg
+# percentiles doesn't work on stats and extended stats currently
+percentiles_threshold:
+    "95.0":
+        min: 4
+        max: 5
+    "90.0":
+        min: 6
+        max: 8
+    "99.9":
+        min: 9
+        max: 10 
+percentiles_percents:
+    - 95
+    - 90
+    - 99.9
+percentile_ranks_values:
+    - 90.0 
+
+percentile_ranks_threshold:
+    "90.0":
+         min: 5
+         max: 6
+#extended_stats_sigma: 3
+doc_type: metrics_test
+buckets: 
+#    - date_histogram:
+#        - time_buckets:
+#            - field: "@timestamp"
+#            - interval: "1m"
+#            - format: "yyyy-MM-dd'T'HH:mm:ssZZ"
+#            - time_zone: "+05:30"
+    - terms:
+        - host:
+            - field: "tags.host"
+#    - terms:
+#        - cpu:
+#            - field: "tags.cpu"
+#bucket_interval_sync: true
+stats_threshold:
+    count_min_threshold:
+    count_max_threshold: 100
+    min_threshold:
+    max_threshold: 100
+    sum_min_thresold:
+    sum_max_threshold: 100
+    avg_min_threshold:
+    avg_max_threshold: 100  
+    std_deviation_min_threshold:
+    std_deviation_max_threshold: 
+
+compare_buckets: "algo1"
+
+filter: 
+- query:
+    query_string:
+        query: "name: connections"
+                  
+min_threshold: 0
+max_threshold: 30
+#victorops_api_key: "be4dccea-31d2-4ea9-8af6-ab23d9cac950"
+#victorops_routing_key: "on_call"
+#victorops_message_type: "CRITICAL"
+# (Required)
+# The alert is use when a match is found
+exotel_account_sid: 'exotel119'
+exotel_auth_token: '4f8c08881b5a383377fe6951074879a5a2ad18aa'
+exotel_from_number: '8033037034' 
+exotel_to_number: '09466103303'
+exotel_message_body: "Hey dude cpu is spiking high"
+alert:
+- "exotel" 

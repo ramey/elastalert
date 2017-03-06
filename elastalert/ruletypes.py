@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import copy
 import datetime
+import numpy
 
 from blist import sortedlist
 from util import add_raw_postfix
@@ -52,7 +53,8 @@ class RuleType(object):
         ts = self.rules.get('timestamp_field')
         if ts in event:
             event[ts] = dt_to_ts(event[ts])
-        self.matches.append(event)
+        self.matches.append(dict(event))
+        
 
     def get_match_str(self, match):
         """ Returns a string that gives more context about a match.
@@ -82,7 +84,8 @@ class RuleType(object):
 
         :param terms: A list of buckets with a key, corresponding to query_key, and the count """
         raise NotImplementedError()
-
+    def add_aggregarion_data(self, payload):
+        raise NotImplementedError()
 
 class CompareRule(RuleType):
     """ A base class for matching a specific term by passing it to a compare function """
@@ -829,3 +832,176 @@ class CardinalityRule(RuleType):
                                                                                                          self.rules['cardinality_field'],
                                                                                                          starttime, endtime))
         return message
+
+class  MetricAggregationRule(RuleType):
+    required_options = frozenset(['metric_agg_key', 'metric_agg_type'])
+    allowed_aggregations = frozenset(['min', 'max', 'avg', 'sum', 'cardinality', 'value_count', 'stats', 'extended_stats', 'percentiles', 'percentile_ranks'])
+    def __init__(self, *args):
+        super(MetricAggregationRule, self).__init__(*args)
+        self.buckets_to_compare = []
+        self.ts_field = self.rules.get('timestamp_field', '@timestamp')
+        if 'max_threshold' not in self.rules and 'min_threshold' not in self.rules:
+            raise EAException("MetricAggregationRule must have at least one of either max_threshold or min_threshold")
+        self.metric_key = self.rules['metric_agg_key'] + '_' + self.rules['metric_agg_type']
+        if self.rules['buckets']:
+            self.rules['bucket_names'] = []
+            for bucket in self.rules['buckets']:
+                self.rules['bucket_names'].append(bucket[bucket.keys()[0]][0].keys()[0])
+        if not self.rules['metric_agg_type'] in self.allowed_aggregations:
+            raise EAException("metric_agg_type must be one of %s" % (str(self.allowed_aggregations)))
+        self.rules['aggregation_query_element'] = self.generate_aggregation_query()
+       
+
+    def generate_aggregation_query(self):
+        if self.rules['metric_agg_type'] == 'extended_stats':
+            return { self.metric_key: {self.rules['metric_agg_type']: {'field': self.rules['metric_agg_key'], 'sigma': self.rules['extended_stats_sigma']}}}
+        elif self.rules['metric_agg_type'] == 'percentiles':
+            return { self.metric_key: {self.rules['metric_agg_type']: {'field': self.rules['metric_agg_key'], 'percents': self.rules['percentiles_percents']}}}
+        elif self.rules['metric_agg_type'] == 'percentile_ranks':
+            return { self.metric_key: {self.rules['metric_agg_type']: {'field': self.rules['metric_agg_key'], 'values': self.rules['percentile_ranks_values']}}}
+        else:
+            return { self.metric_key: {self.rules['metric_agg_type']: {'field': self.rules['metric_agg_key']}}}
+
+
+    def add_aggregation_data(self, payload):
+        for timestamp, payload_data in payload.iteritems():
+           self.unwrap_buckets(timestamp, payload_data)
+
+
+    def unwrap_buckets(self, timestamp, term_bucket):
+        for bucket_name, bucket_data in term_bucket.iteritems():
+            self.check_buckets_matches(timestamp, bucket_data, bucket_name)
+                 
+
+    def check_percentiles(self, timestamp, percentiles_data, query):
+        thresholds = self.rules[self.rules['metric_agg_type'] + '_threshold']
+        if self.rules['buckets']:
+            percentiles_stats =  percentiles_data[self.metric_key]
+        else:
+            percentiles_stats = percentiles_data
+        print thresholds
+        for percentile, value in percentiles_stats['values'].iteritems():
+            event = dict(query)
+            event['timestamp_fields'] = timestamp
+            event[self.metric_key + "_" + percentile] = value
+            if percentile in thresholds:
+                if ('compare_buckets' in self.rules) and (self.rules['compare_buckets'] != None):
+                    self.buckets_to_compare.append(dict(event))
+                else:
+                    if ('min' in thresholds[percentile]) and (value <= thresholds[percentile]['min']):
+                        self.add_match(event)
+                    if ('max' in thresholds[percentile]) and (value >= thresholds[percentile]['max']):
+                        self.add_match(event)
+
+
+    def check_buckets_matches(self, timestamp, bucket_data, bucket_name, query={}):
+       if 'buckets' in bucket_data:
+            for bucket in bucket_data['buckets']:
+                if 'key_as_string' in bucket:
+                    query[bucket_name]  = bucket['key_as_string']
+                else:
+                    query[bucket_name] = bucket['key']
+                next_bucket_name = self.get_bucket_key(bucket)
+                if next_bucket_name:
+                    self.check_buckets_matches(timestamp, bucket[next_bucket_name], next_bucket_name, query)
+                else:
+                    if (self.rules['metric_agg_type'] == 'stats') or (self.rules['metric_agg_type'] == 'extended_stats'):
+                        self.check_stats(timestamp, bucket, query)
+                    elif (self.rules['metric_agg_type'] == 'percentiles') or (self.rules['metric_agg_type'] == 'percentile_ranks'):
+                        self.check_percentiles(timestamp, bucket, query)
+                    else:
+                        self.check_matches(timestamp, bucket, query)
+       else:
+           if (self.rules['metric_agg_type'] == 'stats') or (self.rules['metric_agg_type'] == 'extended_stats'):
+               self.check_stats(timestamp, bucket_data, {})
+           elif (self.rules['metric_agg_type'] == 'percentiles') or (self.rules['metric_agg_type'] == 'parcentile_ranks'):
+               self.check_percentiles(timestamp, bucket_data, {})
+           else:
+               self.check_matches(timestamp, bucket_data, {}) 
+
+
+    def check_stats(self, timestamp, bucket_data, query):
+        if self.rules['buckets']:
+            stats =  bucket_data[self.metric_key]
+        else:
+            stats = bucket_data
+        for stat_name, stat_value in stats.iteritems():
+            event = dict(query)
+            event['timestamp_fields'] = timestamp
+            event[self.metric_key + "_" + stat_name] = stat_value
+            if ('compare_buckets' in self.rules) and (self.rules['compare_buckets'] != None):
+                self.buckets_to_compare.append(dict(event))
+            elif self.check_stats_thresholds(stat_name, stat_value):
+                self.add_match(event)
+
+
+    def check_matches(self, timestamp, bucket_data, query):
+        if self.rules['buckets']:
+            metric_val = bucket_data[self.metric_key]['value']
+        else: 
+            metric_val = bucket_data['value']
+        query['timestamp_fields'] = timestamp
+        query[self.metric_key] = metric_val
+        if ('compare_buckets' in self.rules) and (self.rules['compare_buckets'] != None):
+            self.buckets_to_compare.append(dict(query))
+        elif self.check_thresholds(metric_val):
+            self.add_match(query)
+
+
+    def get_bucket_key(self, bucket): 
+        for key in bucket.keys():
+            if key in self.rules['bucket_names']:
+                return key
+
+
+    def check_stats_thresholds(self, stat_name, stat_value):
+        if stat_name == 'min':
+            if 'min_threshold' in self.rules['stats_threshold'] and stat_value < self.rules['stats_threshold']['min_threshold']:
+                return True
+        elif stat_name == 'max':
+            if 'max_threshold' in self.rules['stats_threshold'] and stat_value >= self.rules['stats_threshold']['max_threshold']:
+                return True
+        else:
+            if stat_name + '_max_threshold' in self.rules['stats_threshold'] and stat_value >=  self.rules['stats_threshold'][stat_name + '_max_threshold']:
+                return True
+            if stat_name + '_min_threshold' in self.rules['stats_threshold'] and stat_value < self.rules['stats_threshold'][stat_name + '_min_threshold']:
+                return True
+
+
+    def check_thresholds(self, metric_value):
+        if 'max_threshold' in self.rules and metric_value >= self.rules['max_threshold']:
+            return True
+        if 'min_threshold' in self.rules and metric_value < self.rules['min_threshold']: 
+            return True
+        return False 
+    
+    def algo1(self):
+        bucket_values = []        
+        for bucket in self.buckets_to_compare:
+            bucket_values.append(bucket[self.metric_key])
+        print bucket_values
+        med = numpy.median(numpy.array(bucket_values))       
+        med_dis_sum = 0
+        for value in bucket_values:
+            med_dis_sum += abs(value - med)
+        med_dis_avg = med_dis_sum/len(bucket_values)
+        surprise_values = []
+	for value in bucket_values:
+            surprise_values.append(abs(value - med)/med_dis_avg)
+        percentile_90 = numpy.percentile(numpy.array(surprise_values), 90)
+        for i in range(0, len(bucket_values)):
+            if surprise_values[i] >= 1.5 * percentile_90:
+                self.add_match(self.buckets_to_compare[i])
+        self.buckets_to_compare = []
+
+    def compare_buckets(self):
+        algo = self.rules['compare_buckets']
+        getattr(self, algo)() 
+
+    def get_match_str(self, match):
+        if (self.rules['metric_agg_type'] == 'stats') or (self.rules['metric_agg_type'] == 'extended_stats') or (self.rules['metric_agg_type'] == 'percentiles') or (self.rules['metric_agg_type'] == 'percentile_ranks'):
+           message = 'Threshold violation, %s:%s' %(self.rules['metric_agg_type'], self.rules['metric_agg_key']) 
+        else:
+            message = 'Threshold violation, %s:%s (min: %s max: %s) \n\n' %(self.rules['metric_agg_type'],self.rules['metric_agg_key'],self.rules.get('min_threshold'), self.rules.get('max_threshold'))
+        return message
+
