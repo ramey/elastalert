@@ -194,8 +194,9 @@ class ElastAlerter():
         #if bucket_type == "terms":
 	 #   name = 
     def get_buckets_aggregation_query(self, rule):
+        """Generates a bucket aggregation query"""
         bucket_query = {}
-        bucket_query = rule['aggregation_query_element']
+        bucket_query = rule['aggregation_query']
         bucket_queries = []
         for bucket in rule['buckets']:
             bucket_obj = Bucket(bucket)
@@ -396,9 +397,10 @@ class ElastAlerter():
         return {endtime: buckets}
 
     def get_hits_aggregation(self, rule, starttime, endtime, index):
+        """"Forms an aggregation query and query ES to get the output form ES"""
         rule_filter = copy.copy(rule['filter'])
         base_query = self.get_query(rule_filter, starttime, endtime, timestamp_field=rule['timestamp_field'], sort=False, to_ts_func=rule['dt_to_ts'], five=True)
-        query = self.get_aggregation_query(base_query, rule)
+        query = self.get_aggregation_query(base_query, rule, '@timestamp')
         try:
             res = self.current_es.search(index=index, doc_type=rule['doc_type'], body=query, size=0, ignore_unavailable=True)
         except ElasticsearchException as e:
@@ -457,7 +459,7 @@ class ElastAlerter():
             data = self.get_hits_count(rule, start, end, index)
         elif rule.get('use_terms_query'):
             data = self.get_hits_terms(rule, start, end, index, rule['query_key'])
-        elif rule.get('aggregation_query_element'):
+        elif rule.get('aggregation_query'):
             data = self.get_hits_aggregation(rule, start, end, index)
         else:
             data = self.get_hits(rule, start, end, index, scroll)
@@ -471,7 +473,7 @@ class ElastAlerter():
                 rule_inst.add_count_data(data)
             elif rule.get('use_terms_query'):
                 rule_inst.add_terms_data(data)
-            elif rule.get('aggregation_query_element'):
+            elif rule.get('aggregation_query'):
                 rule_inst.add_aggregation_data(data)
             else:
                 rule_inst.add_data(data)
@@ -1504,6 +1506,8 @@ class ElastAlerter():
         return timestamp + wait, exponent
 
 class Bucket():
+    """This is the bucket class. It contains current information about the bucket
+    Useful in creating nested bucket aggregation"""
     def __init__(self, bucket):
         self.bucket_type = bucket.keys()[0]
         self.name = bucket[self.bucket_type][0].keys()[0]

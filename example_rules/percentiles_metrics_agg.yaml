@@ -1,0 +1,53 @@
+name: CPU Spike Rule
+type: metric_aggregation
+
+es_host: localhost
+es_port: 9200
+
+index: metrics
+
+buffer_time:
+  minutes: 5
+
+metric_agg_key: fields.usage_idle
+# percentile_ranks work in similiar way
+metric_agg_type: percentiles
+# percentiles doesn't work on stats and extended stats currently
+percentiles_threshold:
+    "95.0":
+        min: 4
+        max: 5
+    "90.0":
+        min: 6
+        max: 8
+    "99.9":
+        min: 9
+        max: 10 
+percentiles_percents:
+    - 95
+    - 90
+    - 99.9
+#percentile_ranks_values:
+#    - 90.0 
+
+#percentile_ranks_threshold:
+#    "90.0":
+#         min: 5
+#         max: 6
+doc_type: metrics_test
+
+buckets: 
+    - terms:
+        - host:
+            - field: "tags.host"
+    - terms:
+        - cpu:
+            - field: "tags.cpu"
+
+victorops_api_key: "be4dccea-31d2-4ea9-8af6-ab23d9cac950"
+victorops_routing_key: "on_call"
+victorops_message_type: "CRITICAL"
+# (Required)
+# The alert is use when a match is found
+alert:
+- "victorops" 

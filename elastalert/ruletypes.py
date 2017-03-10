@@ -833,26 +833,44 @@ class CardinalityRule(RuleType):
                                                                                                          starttime, endtime))
         return message
 
-class  MetricAggregationRule(RuleType):
+
+class MetricAggregationRule(RuleType):
+    """A rule to do aggreagtions on metrics data in ElasticSearch"""
     required_options = frozenset(['metric_agg_key', 'metric_agg_type'])
     allowed_aggregations = frozenset(['min', 'max', 'avg', 'sum', 'cardinality', 'value_count', 'stats', 'extended_stats', 'percentiles', 'percentile_ranks'])
     def __init__(self, *args):
         super(MetricAggregationRule, self).__init__(*args)
         self.buckets_to_compare = []
         self.ts_field = self.rules.get('timestamp_field', '@timestamp')
-        if 'max_threshold' not in self.rules and 'min_threshold' not in self.rules:
-            raise EAException("MetricAggregationRule must have at least one of either max_threshold or min_threshold")
+        """Checking if the required thresholds are present"""
+        if 'compare_buckets' in self.rules:
+            if 'buckets' not in self.rules:
+                raise EAException("Give bucket conditions to form buckets")
+            if not 'compare_buckets' in self.rules:
+                raise EAException("ALgorithm not specified to compare buckets")
+            if (self.rules['metric_agg_type'] == 'stats') or (self.rules['metric_agg_type'] == 'extended_stats') or (self.rules['metric_agg_type'] == 'percentiles') or (self.rules['metric_agg_type'] == 'percentile_ranks'):
+                raise EAException("comparison of buckets not supported currently on %s" % (self.rules['metric_agg_type']))
+        else: 
+            if (self.rules['metric_agg_type'] == 'stats') or (self.rules['metric_agg_type'] == 'extended_stats') and ('stats_threshold' not in self.rules):
+                raise EAException("stats_threshold required")
+            elif (self.rules['metric_agg_type'] == 'percentiles') and ('percentiles_threshold' not in self.rules):
+                raise EAException("percentiles_threshold required")
+            elif (self.rules['metric_agg_type'] == 'percentile_ranks') and ('percentile_ranks_threshold' not in self.rules):
+                raise EAException("percentile_ranks_threshold required")
+            elif 'max_threshold' not in self.rules and 'min_threshold' not in self.rules:
+                raise EAException("MetricAggregationRule must have at least one of either max_threshold or min_threshold")
         self.metric_key = self.rules['metric_agg_key'] + '_' + self.rules['metric_agg_type']
+        """Creating a list of all the buckets"""
         if self.rules['buckets']:
             self.rules['bucket_names'] = []
             for bucket in self.rules['buckets']:
                 self.rules['bucket_names'].append(bucket[bucket.keys()[0]][0].keys()[0])
         if not self.rules['metric_agg_type'] in self.allowed_aggregations:
             raise EAException("metric_agg_type must be one of %s" % (str(self.allowed_aggregations)))
-        self.rules['aggregation_query_element'] = self.generate_aggregation_query()
+        self.rules['aggregation_query'] = self.generate_aggregation_query()
        
-
     def generate_aggregation_query(self):
+        """generates a basic aggregation query"""
         if self.rules['metric_agg_type'] == 'extended_stats':
             return { self.metric_key: {self.rules['metric_agg_type']: {'field': self.rules['metric_agg_key'], 'sigma': self.rules['extended_stats_sigma']}}}
         elif self.rules['metric_agg_type'] == 'percentiles':
@@ -862,24 +880,21 @@ class  MetricAggregationRule(RuleType):
         else:
             return { self.metric_key: {self.rules['metric_agg_type']: {'field': self.rules['metric_agg_key']}}}
 
-
     def add_aggregation_data(self, payload):
         for timestamp, payload_data in payload.iteritems():
            self.unwrap_buckets(timestamp, payload_data)
 
-
-    def unwrap_buckets(self, timestamp, term_bucket):
-        for bucket_name, bucket_data in term_bucket.iteritems():
+    def unwrap_buckets(self, timestamp, bucket):
+        for bucket_name, bucket_data in bucket.iteritems():
             self.check_buckets_matches(timestamp, bucket_data, bucket_name)
-                 
 
     def check_percentiles(self, timestamp, percentiles_data, query):
+        """Check percentiles with there thresholds and add a match"""
         thresholds = self.rules[self.rules['metric_agg_type'] + '_threshold']
         if self.rules['buckets']:
             percentiles_stats =  percentiles_data[self.metric_key]
         else:
             percentiles_stats = percentiles_data
-        print thresholds
         for percentile, value in percentiles_stats['values'].iteritems():
             event = dict(query)
             event['timestamp_fields'] = timestamp
@@ -893,8 +908,8 @@ class  MetricAggregationRule(RuleType):
                     if ('max' in thresholds[percentile]) and (value >= thresholds[percentile]['max']):
                         self.add_match(event)
 
-
     def check_buckets_matches(self, timestamp, bucket_data, bucket_name, query={}):
+       """Form buckets based on the query and add a match if a threshold is crossed"""
        if 'buckets' in bucket_data:
             for bucket in bucket_data['buckets']:
                 if 'key_as_string' in bucket:
@@ -921,6 +936,7 @@ class  MetricAggregationRule(RuleType):
 
 
     def check_stats(self, timestamp, bucket_data, query):
+        """If extended_stats and stats are given as aggregation type, check the threshold and add it to a match"""
         if self.rules['buckets']:
             stats =  bucket_data[self.metric_key]
         else:
@@ -936,6 +952,7 @@ class  MetricAggregationRule(RuleType):
 
 
     def check_matches(self, timestamp, bucket_data, query):
+        """check for a match of a bucket or add it to buckets_to_compare if compare_buckets is given"""
         if self.rules['buckets']:
             metric_val = bucket_data[self.metric_key]['value']
         else: 
@@ -949,14 +966,16 @@ class  MetricAggregationRule(RuleType):
 
 
     def get_bucket_key(self, bucket): 
+        """get the name of the bucket"""
         for key in bucket.keys():
             if key in self.rules['bucket_names']:
                 return key
 
 
     def check_stats_thresholds(self, stat_name, stat_value):
+        """Check for the stats threshold if the agg type is 'stats' or 'extended_stats' """
         if stat_name == 'min':
-            if 'min_threshold' in self.rules['stats_threshold'] and stat_value < self.rules['stats_threshold']['min_threshold']:
+            if 'min_threshold' in self.rules['stats_threshold'] and stat_value <= self.rules['stats_threshold']['min_threshold']:
                 return True
         elif stat_name == 'max':
             if 'max_threshold' in self.rules['stats_threshold'] and stat_value >= self.rules['stats_threshold']['max_threshold']:
@@ -969,13 +988,25 @@ class  MetricAggregationRule(RuleType):
 
 
     def check_thresholds(self, metric_value):
+        """Check thresholds for a basic aggregation"""
         if 'max_threshold' in self.rules and metric_value >= self.rules['max_threshold']:
             return True
-        if 'min_threshold' in self.rules and metric_value < self.rules['min_threshold']: 
+        if 'min_threshold' in self.rules and metric_value <= self.rules['min_threshold']: 
             return True
         return False 
     
     def algo1(self):
+        """ Takes the buckets from buckets_to_compare
+            forms an array of the values to monitor
+            calculates the median of the values
+            calculates the distance of each point form the median
+            calculates the average distance from the median
+            calculates the surprise(s) for the datapoints
+            s = (distance from median) / (avg distance form median)
+            calculates the 90th percentile of the surprise values (s)
+            is any point is greater than 1.5 times 90th percentile of surprise
+            it is an anomaly
+        """
         bucket_values = []        
         for bucket in self.buckets_to_compare:
             bucket_values.append(bucket[self.metric_key])

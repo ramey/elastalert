@@ -1,0 +1,36 @@
+name: CPU Spike Rule
+type: metric_aggregation
+
+es_host: localhost
+es_port: 9200
+
+index: metrics
+
+buffer_time:
+  minutes: 5
+
+metric_agg_key: fields.usage_idle
+metric_agg_type: extended_stats
+# percentiles doesn't work on stats and extended stats currently
+extended_stats_sigma: 3
+doc_type: metrics_test
+
+stats_threshold:
+    count_min_threshold:
+    count_max_threshold: 100
+    min_threshold:
+    max_threshold: 100
+    sum_min_thresold:
+    sum_max_threshold: 100
+    avg_min_threshold:
+    avg_max_threshold: 100  
+    std_deviation_min_threshold:
+    std_deviation_max_threshold: 
+
+victorops_api_key: "be4dccea-31d2-4ea9-8af6-ab23d9cac950"
+victorops_routing_key: "on_call"
+victorops_message_type: "CRITICAL"
+# (Required)
+# The alert is use when a match is found
+alert:
+- "victorops" 

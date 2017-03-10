@@ -9,8 +9,8 @@ index: metrics
 buffer_time:
   minutes: 5
 
-metric_agg_key: fields.value
-metric_agg_type: avg
+metric_agg_key: fields.usage_idle
+metric_agg_type: extended_stats
 # percentiles doesn't work on stats and extended stats currently
 percentiles_threshold:
     "95.0":
@@ -45,10 +45,9 @@ buckets:
     - terms:
         - host:
             - field: "tags.host"
-#    - terms:
-#        - cpu:
-#            - field: "tags.cpu"
-#bucket_interval_sync: true
+    - terms:
+        - cpu:
+            - field: "tags.cpu"
 stats_threshold:
     count_min_threshold:
     count_max_threshold: 100
@@ -63,11 +62,6 @@ stats_threshold:
 
 compare_buckets: "algo1"
 
-filter: 
-- query:
-    query_string:
-        query: "name: connections"
-                  
 min_threshold: 0
 max_threshold: 30
 #victorops_api_key: "be4dccea-31d2-4ea9-8af6-ab23d9cac950"

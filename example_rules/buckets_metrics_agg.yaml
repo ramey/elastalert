@@ -1,0 +1,39 @@
+name: CPU Spike Rule
+type: metric_aggregation
+
+es_host: localhost
+es_port: 9200
+
+index: metrics
+
+buffer_time:
+  minutes: 5
+
+metric_agg_key: fields.usage_idle
+metric_agg_type: max
+doc_type: metrics_test
+# this will first create  1m buckets then divide them into hosts then based on cpu and then get max of each bucket
+buckets: 
+    - date_histogram:
+        - time_buckets:
+            - field: "@timestamp"
+            - interval: "1m"
+            - format: "yyyy-MM-dd'T'HH:mm:ssZZ"
+            - time_zone: "+05:30"
+    - terms:
+        - host:
+            - field: "tags.host"
+    - terms:
+        - cpu:
+            - field: "tags.cpu"
+
+min_threshold: 0
+max_threshold: 30
+
+victorops_api_key: "be4dccea-31d2-4ea9-8af6-ab23d9cac950"
+victorops_routing_key: "on_call"
+victorops_message_type: "CRITICAL"
+# (Required)
+# The alert is use when a match is found
+alert:
+- "exotel" 
